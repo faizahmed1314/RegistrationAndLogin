@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Mail;
 using System.Web;
 using System.Web.Mvc;
+using System.Web.Security;
 
 namespace RegistrationAndLogin.Controllers
 {
@@ -21,7 +22,7 @@ namespace RegistrationAndLogin.Controllers
         [ValidateAntiForgeryToken]
         public ActionResult Registraion([Bind(Exclude = "IsEmailVerified,ActivationCode")] User user)
         {
-            bool Status = true;
+            bool Status = false;
             string message = "";
 
             //Model Validation
@@ -75,6 +76,89 @@ namespace RegistrationAndLogin.Controllers
             ViewBag.Status = Status;
 
             return View(user);
+        }
+
+
+        //Verify Account
+        [HttpGet]
+        public ActionResult VerifyAccount(string id)
+        {
+            bool Status = false;
+            using(MyDatabaseEntities db=new MyDatabaseEntities())
+            {
+                //This line i have added here to avoid confirm password does not match issue on save change 
+                db.Configuration.ValidateOnSaveEnabled = false;
+                var user = db.Users.Where(x => x.ActivationCode == new Guid(id)).FirstOrDefault();
+                if (user != null)
+                {
+                    user.IsEmailVerified = true;
+                    db.SaveChanges();
+                    Status = true;
+                }
+                else
+                {
+                    ViewBag.Message = "Invalid Request!";
+                }
+            }
+            ViewBag.Status = Status;
+            return View();
+        }
+        //Login
+        [HttpGet]
+        public ActionResult Login()
+        {
+            return View();
+        }
+        [HttpPost]
+        public ActionResult Login(UserLogin userLogin, string returnUrl)
+        {
+            string message = "";
+            using(MyDatabaseEntities db=new MyDatabaseEntities())
+            {
+                var user = db.Users.Where(x => x.EmailID == userLogin.EmailID).FirstOrDefault();
+                if (user != null)
+                {
+                    if (string.Compare(Crypto.Hash(userLogin.Password), user.Password) == 0)
+                    {
+                        int timeOut = userLogin.RememberMe ? 525600 : 20; //525600 min= 1year
+                        var ticket = new FormsAuthenticationTicket(userLogin.EmailID, userLogin.RememberMe, timeOut);
+                        string encrypted = FormsAuthentication.Encrypt(ticket);
+                        var cookie = new HttpCookie(FormsAuthentication.FormsCookieName, encrypted);
+                        cookie.Expires = DateTime.Now.AddMinutes(timeOut);
+                        cookie.HttpOnly = true;
+                        Response.Cookies.Add(cookie);
+
+                        if (Url.IsLocalUrl(returnUrl))
+                        {
+                            return Redirect(returnUrl);
+                        }
+                        else
+                        {
+                            return RedirectToAction("Index", "Home");
+                        }
+                    }
+                    else
+                    {
+                        message = "Invalid Credential Provided";
+
+                    }
+                }
+                else
+                {
+                    message = "Invalid Credential Provided";
+                }
+            }
+            ViewBag.Message = message;
+            return View();
+        }
+
+        //Logout
+        [Authorize]
+        [HttpPost]
+        public ActionResult Logout()
+        {
+            FormsAuthentication.SignOut();
+            return RedirectToAction("Login", "User");
         }
 
         [NonAction]
